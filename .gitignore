@@ -1,0 +1,28 @@
+# 数据（太大，不上传）
+data/
+data_cwru/
+data/**/*.mat
+data/**/*.npz
+
+# 输出（模型权重、结果文件）
+outputs/
+outputs_cwru/
+**/*.pth
+**/*.pt
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
