@@ -27,7 +27,11 @@ import numpy as np
 from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
 from src.training.train_fewshot import train_fewshot
-from src.models.prototypical import prototypical_loss
+from src.models.prototypical import (
+    prototypical_loss,
+    CrossAttentionModule,
+    prototypical_loss_crossattn,
+)
 
 
 def parse_args():
@@ -36,7 +40,7 @@ def parse_args():
     parser.add_argument("--method", default="ProtoNet_Cosine",
                         choices=["ProtoNet_CNN", "ProtoNet_ResNet",
                                  "ProtoNet_Cosine", "ProtoNet_CosineT",
-                                 "ProtoNet_Transductive"])
+                                 "ProtoNet_Transductive", "ProtoNet_CrossAttn"])
     parser.add_argument("--no_aug", action="store_true",
                         help="关闭数据增强")
     parser.add_argument("--no_pretrain", action="store_true",
@@ -68,30 +72,61 @@ def main():
     print(f"# 方法: {method}")
     print(f"{'#'*60}")
 
+    cross_attn = None
+
     if method == "ProtoNet_CNN":
         encoder = create_encoder("cnn").to(device)
+    elif method == "ProtoNet_CrossAttn":
+        encoder = create_encoder(backbone, encoder_dim=encoder_dim,
+                                 use_se=True).to(device)
+        cross_attn = CrossAttentionModule(d_model=encoder_dim).to(device)
+        ca_params = sum(p.numel() for p in cross_attn.parameters())
+        print(f"🆕 跨注意力模块 (参数: {ca_params/1e3:.1f}K)")
     else:
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
                                  use_se=True).to(device)
 
     # 加载 SimCLR 预训练权重
     if not args.no_pretrain and method != "ProtoNet_CNN":
-        pretrain_path = os.path.join(cfg["paths"]["output_dir"],
-                                     f"pretrained_{backbone}_encoder.pth")
-        if os.path.exists(pretrain_path):
-            encoder.load_state_dict(
-                torch.load(pretrain_path, map_location=device))
+        # 先查 config 指定路径，再 fallback 到默认 outputs/
+        cand_paths = [
+            os.path.join(cfg["paths"]["output_dir"],
+                         f"pretrained_{backbone}_encoder.pth"),
+            os.path.join("outputs",
+                         f"pretrained_{backbone}_encoder.pth"),
+        ]
+        pretrain_path = None
+        for p in cand_paths:
+            if os.path.exists(p):
+                pretrain_path = p
+                break
+
+        if pretrain_path:
+            sd = torch.load(pretrain_path, map_location=device)
+            # 检查 fc 层维度是否匹配（处理 encoder_dim 变化）
+            fc_key = 'fc.weight'
+            if fc_key in sd and sd[fc_key].shape != encoder.fc.weight.shape:
+                print(f"   ⚠️ fc 维度不匹配: 预训练 {sd[fc_key].shape} → 模型 {encoder.fc.weight.shape}，跳过 fc")
+                del sd[fc_key]
+                if 'fc.bias' in sd:
+                    del sd['fc.bias']
+            miss, unexp = encoder.load_state_dict(sd, strict=False)
             print(f"✅ 加载 SimCLR 预训练权重: {pretrain_path}")
+            if miss:
+                print(f"   缺失键: {len(miss)} (fc 层随机初始化)")
+            if unexp:
+                print(f"   意外键: {len(unexp)}")
         else:
             print(f"ℹ️  未找到 SimCLR 预训练权重，从头训练")
 
     sep_weight = args.sep if args.sep is not None else \
         cfg.get("training", {}).get("sep_weight", 0.05)
 
+    ca_kwargs = {"cross_attn": cross_attn} if cross_attn is not None else {}
     encoder, best_val_acc = train_fewshot(
         encoder, train_dataset, val_dataset, cfg, device,
         method=method, sep_weight=sep_weight,
-        use_augmentation=not args.no_aug)
+        use_augmentation=not args.no_aug, **ca_kwargs)
 
     # ===== 测试集全面评估 =====
     print(f"\n{'='*50}")
@@ -105,6 +140,7 @@ def main():
         'ProtoNet_Cosine': 'cosine',
         'ProtoNet_CosineT': 'cosine',
         'ProtoNet_Transductive': 'transductive',
+        'ProtoNet_CrossAttn': 'crossattn',
     }
     proto_method = method_map.get(method, 'cosine')
 
@@ -119,9 +155,11 @@ def main():
         sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot,
                                    query=query)
         encoder.eval()
+        if cross_attn is not None:
+            cross_attn.eval()
         accs = []
 
-        # Transductive 评估用不同参数
+        # Transductive / CrossAttn 评估参数
         trans_kwargs = {}
         if proto_method == 'transductive':
             trans_kwargs = {'num_steps': 10, 'tau': 0.5, 'mix_ratio': 0.7}
@@ -134,9 +172,14 @@ def main():
                 s_y = s_y.to(device)
                 q_y = q_y.to(device)
 
-                _, acc = prototypical_loss(
-                    encoder, s_x, s_y, q_x, q_y, device,
-                    sep_weight=0, method=proto_method, **trans_kwargs)
+                if cross_attn is not None:
+                    _, acc = prototypical_loss_crossattn(
+                        encoder, cross_attn, s_x, s_y, q_x, q_y,
+                        device, sep_weight=0)
+                else:
+                    _, acc = prototypical_loss(
+                        encoder, s_x, s_y, q_x, q_y, device,
+                        sep_weight=0, method=proto_method, **trans_kwargs)
                 accs.append(acc)
 
         mean_acc = np.mean(accs) * 100

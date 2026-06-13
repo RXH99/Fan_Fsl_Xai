@@ -19,13 +19,15 @@ from ..data.dataset import EpisodicSampler
 from ..data.augmentation import augment_vibration_batch
 from ..models.prototypical import (
     prototypical_loss,
+    prototypical_loss_crossattn,
+    evaluate_crossattn,
 )
 
 
 def train_fewshot(encoder, train_dataset, val_dataset, config, device,
                   method="ProtoNet_Cosine", sep_weight=0.05,
                   use_augmentation=True, use_early_stop=True,
-                  patience=30):
+                  patience=30, cross_attn=None):
     """
     训练入口
 
@@ -34,8 +36,10 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
           - 'ProtoNet_Cosine' (默认): 余弦相似度
           - 'ProtoNet_CNN': 欧氏距离
           - 'ProtoNet_Transductive': 直推式推理
+          - 'ProtoNet_CrossAttn': 跨注意力增强
           - 'ProtoNet_ResNet': 旧名兼容 → 映射到 Cosine
           - 'ProtoNet_CosineT': 旧名兼容
+        cross_attn: CrossAttentionModule（仅 ProtoNet_CrossAttn 用）
         use_augmentation: 是否在 episode 中做数据增强
         use_early_stop: 早停
         patience: 早停 patience
@@ -64,7 +68,12 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
     val_sampler = EpisodicSampler(val_dataset, ways=ways, shot=shot,
                                    query=query)
 
-    optimizer = optim.Adam(encoder.parameters(), lr=lr)
+    # 优化器：包含 cross_attn 参数（如果提供）
+    if cross_attn is not None:
+        optimizer = optim.Adam(
+            list(encoder.parameters()) + list(cross_attn.parameters()), lr=lr)
+    else:
+        optimizer = optim.Adam(encoder.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=15,
         min_lr=1e-6, verbose=True)
@@ -106,13 +115,20 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
                 q_x, noise_std=0.02, mask_ratio=0.0, scale_std=0.03)
 
         # ===== 前向 =====
-        trans_kwargs = {}
-        if proto_method == 'transductive':
-            trans_kwargs = {'num_steps': 5, 'tau': 0.5, 'mix_ratio': 0.7}
+        if cross_attn is not None:
+            # 跨注意力训练
+            cross_attn.train()
+            loss, train_acc = prototypical_loss_crossattn(
+                encoder, cross_attn, s_x, s_y, q_x, q_y, device,
+                sep_weight=sep_weight)
+        else:
+            trans_kwargs = {}
+            if proto_method == 'transductive':
+                trans_kwargs = {'num_steps': 5, 'tau': 0.5, 'mix_ratio': 0.7}
 
-        loss, train_acc = prototypical_loss(
-            encoder, s_x, s_y, q_x, q_y, device,
-            sep_weight=sep_weight, method=proto_method, **trans_kwargs)
+            loss, train_acc = prototypical_loss(
+                encoder, s_x, s_y, q_x, q_y, device,
+                sep_weight=sep_weight, method=proto_method, **trans_kwargs)
 
         optimizer.zero_grad()
         loss.backward()
@@ -133,9 +149,15 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
                     q_y = q_y.to(device)
 
                     # 验证时不加增强
-                    _, acc = prototypical_loss(
-                        encoder, s_x, s_y, q_x, q_y, device,
-                        sep_weight=0, method=proto_method)
+                    if cross_attn is not None:
+                        cross_attn.eval()
+                        _, acc = prototypical_loss_crossattn(
+                            encoder, cross_attn, s_x, s_y, q_x, q_y,
+                            device, sep_weight=0)
+                    else:
+                        _, acc = prototypical_loss(
+                            encoder, s_x, s_y, q_x, q_y, device,
+                            sep_weight=0, method=proto_method)
 
                     val_accs.append(acc)
 
@@ -175,5 +197,11 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
     torch.save(encoder.state_dict(), model_path)
     print(f"\n✅ {method} 训练完成！最佳验证准确率: {best_val_acc:.1f}%")
     print(f"   最佳 epoch: {best_epoch}, 模型保存: {model_path}")
+
+    if cross_attn is not None:
+        ca_path = os.path.join(
+            output_dir, f"crossattn_{method.replace('/', '_')}.pth")
+        torch.save(cross_attn.state_dict(), ca_path)
+        print(f"   跨注意力模块保存: {ca_path}")
 
     return encoder, best_val_acc

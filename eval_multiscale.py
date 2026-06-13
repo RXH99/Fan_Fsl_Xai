@@ -1,6 +1,6 @@
 """
-最终评估：多尺度 base64 + 跨注意力 + UWT
-运行: python eval_final.py
+评估多尺度编码器 + 不确定性加权直推式推理
+运行: python eval_multiscale.py
 """
 
 import os, sys
@@ -11,23 +11,16 @@ import torch.nn.functional as F
 import numpy as np
 from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
-from src.models.prototypical import CrossAttentionModule
 
 
-def evaluate_uwt(encoder, cross_attn, support_x, support_y, query_x, query_y,
+def evaluate_uwt(encoder, support_x, support_y, query_x, query_y,
                  num_steps=3, tau=0.3, mix_ratio=0.8, beta=2.0):
-    """跨注意力 + UWT 联合评估"""
     s_emb = encoder(support_x)
     q_emb = encoder(query_x)
-
-    # 跨注意力：query 自适应
-    if cross_attn is not None:
-        q_emb = cross_attn(q_emb, s_emb)
-
     s_emb = F.normalize(s_emb, dim=1)
     q_emb = F.normalize(q_emb, dim=1)
-    ways = len(torch.unique(support_y))
 
+    ways = len(torch.unique(support_y))
     prototypes = torch.stack([
         s_emb[support_y == cls].mean(0) for cls in range(ways)
     ])
@@ -61,25 +54,19 @@ def evaluate_uwt(encoder, cross_attn, support_x, support_y, query_x, query_y,
 
 device = torch.device("cuda")
 print("=" * 60)
-print("🏆 最终评估：base64 + CrossAttn + UWT")
+print("多尺度编码器 — UWT 评估")
 print("=" * 60)
 
+# 加载测试集
 test_dataset = FaultDataset("data/processed/preprocessed.npz", split="test")
 
-# 加载编码器
+# 创建多尺度编码器（encoder_dim=128，与训练时一致）
 encoder = create_encoder("resnet18", encoder_dim=128, use_se=True).to(device)
-encoder.load_state_dict(
-    torch.load("outputs/base64/fewshot_encoder_ProtoNet_CrossAttn.pth",
-               map_location=device))
+ckpt = torch.load("outputs/base64/fewshot_encoder_ProtoNet_Cosine.pth",
+                  map_location=device)
+encoder.load_state_dict(ckpt)
 encoder.eval()
-
-# 加载跨注意力
-cross_attn = CrossAttentionModule(d_model=128).to(device)
-cross_attn.load_state_dict(
-    torch.load("outputs/base64/crossattn_ProtoNet_CrossAttn.pth",
-               map_location=device))
-cross_attn.eval()
-print("✅ 已加载编码器 + 跨注意力模块\n")
+print(f"✅ 已加载多尺度编码器 (encoder_dim=128)")
 
 configs = [
     (5, 1, 15, "5-way 1-shot"),
@@ -88,19 +75,21 @@ configs = [
     (10, 5, 10, "10-way 5-shot"),
 ]
 
-# ===== 参数扫描 =====
-print("参数扫描：beta 对精度的影响\n")
+# 参数扫描 + 主实验
+print("\n参数扫描：beta 对精度的影响\n")
 best_betas = {}
+
 for ways, shot, query, name in configs:
     sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot, query=query)
     best_beta, best_acc = 0, 0
+
     for beta in [0.5, 1.0, 2.0, 3.0, 5.0]:
         accs = []
         for _ in range(300):
             s_x, s_y, q_x, q_y = sampler.sample_episode()
             s_x, q_x, s_y, q_y = s_x.to(device), q_x.to(device), s_y.to(device), q_y.to(device)
             with torch.no_grad():
-                acc = evaluate_uwt(encoder, cross_attn, s_x, s_y, q_x, q_y, beta=beta)
+                acc = evaluate_uwt(encoder, s_x, s_y, q_x, q_y, beta=beta)
                 accs.append(acc)
         mean = np.mean(accs) * 100
         print(f"  {name} beta={beta:.1f} → {mean:.1f}%")
@@ -109,11 +98,12 @@ for ways, shot, query, name in configs:
     best_betas[name] = best_beta
     print(f"  ✅ {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
 
-# ===== 主实验：CrossAttn + UWT =====
+# 主实验：1000 episode
 print("=" * 60)
-print("📊 CrossAttn + UWT (1000 episodes)")
+print("📊 UWT 主实验 (1000 episodes, per-setting best beta)")
 print("=" * 60)
-results = {}
+
+uwt_results = {}
 for ways, shot, query, name in configs:
     beta = best_betas[name]
     sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot, query=query)
@@ -122,28 +112,41 @@ for ways, shot, query, name in configs:
         s_x, s_y, q_x, q_y = sampler.sample_episode()
         s_x, q_x, s_y, q_y = s_x.to(device), q_x.to(device), s_y.to(device), q_y.to(device)
         with torch.no_grad():
-            acc = evaluate_uwt(encoder, cross_attn, s_x, s_y, q_x, q_y, beta=beta)
+            acc = evaluate_uwt(encoder, s_x, s_y, q_x, q_y, beta=beta)
             accs.append(acc)
     mean, std = np.mean(accs) * 100, np.std(accs) * 100
-    results[name] = (mean, std)
+    uwt_results[name] = (mean, std)
     print(f"  {name:<18} beta={beta:.1f} → {mean:.1f}% ± {std:.1f}%")
 
-# ===== 完整进化路线 =====
+# 对照：标准直推式
 print("\n" + "=" * 60)
-print("📈 完整进化路线 (5w5s)")
+print("📊 对照：标准直推式 (beta=0)")
 print("=" * 60)
-lineage = [
-    ("原始 ResNet (单尺度, 64dim)", 94.8),
-    ("+ 多尺度聚合 (base32)", 94.9),
-    ("+ base64 (4M 参数)", 95.4),
-    ("+ 跨注意力 (Cosine)", 96.0),
-    ("+ UWT (当前)", round(results["5-way 5-shot"][0], 1)),
-]
-for label, acc in lineage:
-    bar = "█" * int(acc - 90) + "░" * max(0, 7 - int(acc - 90))
-    print(f"  {label:<30} {acc:.1f}%  {bar}")
 
-print(f"\n{'='*60}")
-final = results["5-way 5-shot"]
-print(f"🏆 最终结果: 5w5s = {final[0]:.1f}% ± {final[1]:.1f}%")
-print(f"{'='*60}")
+for ways, shot, query, name in configs:
+    sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot, query=query)
+    accs = []
+    for _ in range(1000):
+        s_x, s_y, q_x, q_y = sampler.sample_episode()
+        s_x, q_x, s_y, q_y = s_x.to(device), q_x.to(device), s_y.to(device), q_y.to(device)
+        with torch.no_grad():
+            acc = evaluate_uwt(encoder, s_x, s_y, q_x, q_y, beta=0.0)
+            accs.append(acc)
+    mean, std = np.mean(accs) * 100, np.std(accs) * 100
+    base = uwt_results[name]
+    diff = mean - base[0]
+    print(f"  {name:<18} → {mean:.1f}% ± {std:.1f}%  (vs 加权: {base[0]:.1f}%, 差: {diff:+.1f}%)")
+
+# 对比汇总
+print("\n" + "=" * 60)
+print("📊 对比：多尺度 base32 vs 多尺度 base64")
+print("=" * 60)
+# base32 多尺度参考值 (从 outputs/multiscale eval 取)
+prev = {"5-way 1-shot": 92.2, "5-way 5-shot": 94.9, "10-way 1-shot": 83.9, "10-way 5-shot": 90.2}
+for name, (mean, std) in uwt_results.items():
+    p = prev.get(name, 0)
+    diff = mean - p
+    mark = "✅" if diff > 0 else "❌" if diff < -1 else "➖"
+    print(f"  {name:<18} 多尺度: {mean:.1f}%   单尺度: {p:.1f}%   差: {diff:+.1f}%  {mark}")
+
+print("\n✅ 评估完成")

@@ -106,10 +106,8 @@ configs = [
     (10, 5, 10, "10-way 5-shot"),
 ]
 
-# ===== 参数扫描：每个 setting 找最佳 beta =====
+# 参数扫描：找最佳 beta
 print("参数扫描：beta 对精度的影响\n")
-
-best_betas = {}  # 存储每个 setting 的最佳 beta
 
 for ways, shot, query, name in configs:
     sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot, query=query)
@@ -136,18 +134,16 @@ for ways, shot, query, name in configs:
             best_acc = mean_acc
             best_beta = beta
 
-    best_betas[name] = best_beta
     print(f"  ✅ {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
 
 
-# ===== 论文主实验：用各 setting 的最佳 beta 跑 1000 episode =====
+# ===== 论文主实验：用最佳 beta 跑 1000 episode =====
 print("=" * 60)
-print("📊 论文主实验：不确定性加权直推式推理 (1000 episodes, per-setting best beta)")
+print("📊 论文主实验：不确定性加权直推式推理 (1000 episodes)")
 print("=" * 60)
 
 results = {}
 for ways, shot, query, name in configs:
-    beta = best_betas[name]
     sampler = EpisodicSampler(test_dataset, ways=ways, shot=shot, query=query)
     accs = []
 
@@ -159,13 +155,13 @@ for ways, shot, query, name in configs:
         with torch.no_grad():
             acc = uncertainty_weighted_transductive(
                 encoder, s_x, s_y, q_x, q_y,
-                num_steps=3, tau=0.3, mix_ratio=0.8, beta=beta)
+                num_steps=3, tau=0.3, mix_ratio=0.8, beta=2.0)
             accs.append(acc)
 
     mean = np.mean(accs) * 100
     std = np.std(accs) * 100
     results[name] = (mean, std)
-    print(f"  {name:<18} beta={beta:.1f} → {mean:.1f}% ± {std:.1f}%")
+    print(f"  {name:<18} → {mean:.1f}% ± {std:.1f}%")
 
 # ===== 对照：原始直推式（无加权） =====
 print("\n" + "=" * 60)

@@ -1,0 +1,35 @@
+experiment_name: Fan_Fsl_Xai
+
+data:
+  raw_dir: "data"
+  processed_dir: "data/processed"
+  window_size: 1024
+  window_step: 1024
+
+training:
+  cnn:
+    batch_size: 64
+    epochs: 50
+    lr: 0.001
+
+  fewshot:
+    episodes: 3000       # 训练 episode 总数
+    val_episodes: 200     # 验证 episode 数
+    ways: 10
+    shot: 5
+    query: 5              # 10-way 用 5 query 避免超 20 样本
+    lr: 0.0001
+
+  sep_weight: 0.15       # 类间分离损失权重
+
+model:
+  backbone: "resnet18"   # cnn | resnet18 | multiscale_cnn
+  encoder_dim: 64
+  resnet:
+    in_channels: 1
+    base_filters: 32      # 与 encoder.py 默认值一致
+    use_se: true
+
+paths:
+  output_dir: "outputs"
+  data_info: "data/dataset_info.json"
