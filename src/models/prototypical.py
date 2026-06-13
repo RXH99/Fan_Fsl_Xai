@@ -234,7 +234,70 @@ class CrossAttentionModule(nn.Module):
         return out
 
 
-# ============ 跨注意力原型网络损失 ============
+# ============ 跨注意力 V2（多头 + 可选自注意力） ============
+class CrossAttentionModuleV2(nn.Module):
+    """
+    增强版跨注意力模块
+
+    改进 V1:
+      1. 多头注意力（4 heads）→ 多角度同时关注 support
+      2. 可选自注意力层 → query 间互相对齐特征
+      3. 更高 dropout（0.3）→ 缓解过拟合
+
+    Architecture:
+        query → MultiheadCrossAttn(query, support) → LayerNorm
+             → [可选] SelfAttn(query, query) → LayerNorm
+             → FFN → LayerNorm
+    """
+    def __init__(self, d_model=128, nhead=4, dropout=0.3, use_self_attn=True):
+        super().__init__()
+        # 多头交叉注意力
+        self.cross_attn = nn.MultiheadAttention(
+            d_model, nhead, dropout=dropout, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+
+        # 可选自注意力
+        self.use_self_attn = use_self_attn
+        if use_self_attn:
+            self.self_attn = nn.MultiheadAttention(
+                d_model, nhead, dropout=dropout, batch_first=True)
+            self.norm_self = nn.LayerNorm(d_model)
+
+        # FFN
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, d_model * 4),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model * 4, d_model),
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, query, support):
+        # query: (N_q, D), support: (N_s, D)
+        # MultiheadAttention 需要 (B, N, D) 格式
+        q = query.unsqueeze(0)     # (1, N_q, D)
+        s = support.unsqueeze(0)   # (1, N_s, D)
+
+        # 交叉注意力
+        out, _ = self.cross_attn(q, s, s)                 # (1, N_q, D)
+        out = self.norm1(query + out.squeeze(0))          # (N_q, D)
+        out = self.dropout(out)
+
+        # 自注意力
+        if self.use_self_attn:
+            out_u = out.unsqueeze(0)                      # (1, N_q, D)
+            out2, _ = self.self_attn(out_u, out_u, out_u) # (1, N_q, D)
+            out = self.norm_self(out + out2.squeeze(0))   # (N_q, D)
+            out = self.dropout(out)
+
+        # FFN
+        out = self.norm2(out + self.ffn(out))
+
+        return out
+
+
+# ============ 跨注意力 V1 损失 ============
 def prototypical_loss_crossattn(encoder, cross_attn, support_x, support_y,
                                  query_x, query_y, device, sep_weight=0.0):
     """

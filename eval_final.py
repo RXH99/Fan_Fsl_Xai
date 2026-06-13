@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import numpy as np
 from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
-from src.models.prototypical import CrossAttentionModule
+from src.models.prototypical import CrossAttentionModule, CrossAttentionModuleV2
 
 
 def evaluate_uwt(encoder, cross_attn, support_x, support_y, query_x, query_y,
@@ -20,12 +20,14 @@ def evaluate_uwt(encoder, cross_attn, support_x, support_y, query_x, query_y,
     s_emb = encoder(support_x)
     q_emb = encoder(query_x)
 
-    # 跨注意力：query 自适应
-    if cross_attn is not None:
-        q_emb = cross_attn(q_emb, s_emb)
-
+    # 必须先归一化，跟训练一致（cross_attn 训练时接收归一化输入）
     s_emb = F.normalize(s_emb, dim=1)
     q_emb = F.normalize(q_emb, dim=1)
+
+    # 跨注意力：query 使用归一化特征做自适应
+    if cross_attn is not None:
+        q_emb = cross_attn(q_emb, s_emb)
+        q_emb = F.normalize(q_emb, dim=1)
     ways = len(torch.unique(support_y))
 
     prototypes = torch.stack([
@@ -66,20 +68,29 @@ print("=" * 60)
 
 test_dataset = FaultDataset("data/processed/preprocessed.npz", split="test")
 
-# 加载编码器
-encoder = create_encoder("resnet18", encoder_dim=128, use_se=True).to(device)
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--v", type=int, default=1, choices=[1, 2],
+                    help="跨注意力版本: 1 (默认) 或 2")
+args = parser.parse_args()
+
+v_suffix = f"V{args.v}"
+suffix = "V2" if args.v == 2 else ""
+
+encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
+                         base_filters=64).to(device)
 encoder.load_state_dict(
-    torch.load("outputs/base64/fewshot_encoder_ProtoNet_CrossAttn.pth",
+    torch.load(f"outputs/base64/fewshot_encoder_ProtoNet_CrossAttn{suffix}.pth",
                map_location=device))
 encoder.eval()
 
-# 加载跨注意力
-cross_attn = CrossAttentionModule(d_model=128).to(device)
+ca_cls = CrossAttentionModuleV2 if args.v == 2 else CrossAttentionModule
+cross_attn = ca_cls(d_model=128).to(device)
 cross_attn.load_state_dict(
-    torch.load("outputs/base64/crossattn_ProtoNet_CrossAttn.pth",
+    torch.load(f"outputs/base64/crossattn_ProtoNet_CrossAttn{suffix}.pth",
                map_location=device))
 cross_attn.eval()
-print("✅ 已加载编码器 + 跨注意力模块\n")
+print(f"[OK] 已加载编码器 + 跨注意力 V{args.v}\n")
 
 configs = [
     (5, 1, 15, "5-way 1-shot"),
@@ -107,11 +118,11 @@ for ways, shot, query, name in configs:
         if mean > best_acc:
             best_acc, best_beta = mean, beta
     best_betas[name] = best_beta
-    print(f"  ✅ {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
+    print(f"  [OK] {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
 
 # ===== 主实验：CrossAttn + UWT =====
 print("=" * 60)
-print("📊 CrossAttn + UWT (1000 episodes)")
+print("[DATA] CrossAttn + UWT (1000 episodes)")
 print("=" * 60)
 results = {}
 for ways, shot, query, name in configs:
@@ -145,5 +156,5 @@ for label, acc in lineage:
 
 print(f"\n{'='*60}")
 final = results["5-way 5-shot"]
-print(f"🏆 最终结果: 5w5s = {final[0]:.1f}% ± {final[1]:.1f}%")
+print(f"🏆 跨注意力 V{args.v} + UWT: 5w5s = {final[0]:.1f}% ± {final[1]:.1f}%")
 print(f"{'='*60}")

@@ -137,12 +137,12 @@ for ways, shot, query, name in configs:
             best_beta = beta
 
     best_betas[name] = best_beta
-    print(f"  ✅ {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
+    print(f"  [OK] {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
 
 
 # ===== 论文主实验：用各 setting 的最佳 beta 跑 1000 episode =====
 print("=" * 60)
-print("📊 论文主实验：不确定性加权直推式推理 (1000 episodes, per-setting best beta)")
+print("[DATA] 论文主实验：不确定性加权直推式推理 (1000 episodes, per-setting best beta)")
 print("=" * 60)
 
 results = {}
@@ -169,7 +169,7 @@ for ways, shot, query, name in configs:
 
 # ===== 对照：原始直推式（无加权） =====
 print("\n" + "=" * 60)
-print("📊 对照实验：无加权直推式 (beta=0 等价于标准直推)")
+print("[DATA] 对照实验：无加权直推式 (beta=0 等价于标准直推)")
 print("=" * 60)
 
 for ways, shot, query, name in configs:
@@ -193,4 +193,4 @@ for ways, shot, query, name in configs:
     diff = mean - base_mean
     print(f"  {name:<18} → {mean:.1f}% ± {std:.1f}%  (vs 加权: {base_mean:.1f}%, 差: {diff:+.1f}%)")
 
-print("\n✅ 实验结束。Uncertainty-Weighted Transductive 的结果可用于论文。")
+print("\n[OK] 实验结束。Uncertainty-Weighted Transductive 的结果可用于论文。")

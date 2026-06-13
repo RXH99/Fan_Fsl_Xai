@@ -66,7 +66,7 @@ ckpt = torch.load("outputs/base64/fewshot_encoder_ProtoNet_Cosine.pth",
                   map_location=device)
 encoder.load_state_dict(ckpt)
 encoder.eval()
-print(f"✅ 已加载多尺度编码器 (encoder_dim=128)")
+print(f"[OK] 已加载多尺度编码器 (encoder_dim=128)")
 
 configs = [
     (5, 1, 15, "5-way 1-shot"),
@@ -96,11 +96,11 @@ for ways, shot, query, name in configs:
         if mean > best_acc:
             best_acc, best_beta = mean, beta
     best_betas[name] = best_beta
-    print(f"  ✅ {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
+    print(f"  [OK] {name} 最佳 beta={best_beta}, acc={best_acc:.1f}%\n")
 
 # 主实验：1000 episode
 print("=" * 60)
-print("📊 UWT 主实验 (1000 episodes, per-setting best beta)")
+print("[DATA] UWT 主实验 (1000 episodes, per-setting best beta)")
 print("=" * 60)
 
 uwt_results = {}
@@ -120,7 +120,7 @@ for ways, shot, query, name in configs:
 
 # 对照：标准直推式
 print("\n" + "=" * 60)
-print("📊 对照：标准直推式 (beta=0)")
+print("[DATA] 对照：标准直推式 (beta=0)")
 print("=" * 60)
 
 for ways, shot, query, name in configs:
@@ -139,14 +139,14 @@ for ways, shot, query, name in configs:
 
 # 对比汇总
 print("\n" + "=" * 60)
-print("📊 对比：多尺度 base32 vs 多尺度 base64")
+print("[DATA] 对比：多尺度 base32 vs 多尺度 base64")
 print("=" * 60)
 # base32 多尺度参考值 (从 outputs/multiscale eval 取)
 prev = {"5-way 1-shot": 92.2, "5-way 5-shot": 94.9, "10-way 1-shot": 83.9, "10-way 5-shot": 90.2}
 for name, (mean, std) in uwt_results.items():
     p = prev.get(name, 0)
     diff = mean - p
-    mark = "✅" if diff > 0 else "❌" if diff < -1 else "➖"
+    mark = "[OK]" if diff > 0 else "[FAIL]" if diff < -1 else "➖"
     print(f"  {name:<18} 多尺度: {mean:.1f}%   单尺度: {p:.1f}%   差: {diff:+.1f}%  {mark}")
 
-print("\n✅ 评估完成")
+print("\n[OK] 评估完成")

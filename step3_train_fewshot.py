@@ -30,6 +30,7 @@ from src.training.train_fewshot import train_fewshot
 from src.models.prototypical import (
     prototypical_loss,
     CrossAttentionModule,
+    CrossAttentionModuleV2,
     prototypical_loss_crossattn,
 )
 
@@ -40,7 +41,8 @@ def parse_args():
     parser.add_argument("--method", default="ProtoNet_Cosine",
                         choices=["ProtoNet_CNN", "ProtoNet_ResNet",
                                  "ProtoNet_Cosine", "ProtoNet_CosineT",
-                                 "ProtoNet_Transductive", "ProtoNet_CrossAttn"])
+                                 "ProtoNet_Transductive", "ProtoNet_CrossAttn",
+                                 "ProtoNet_CrossAttnV2"])
     parser.add_argument("--no_aug", action="store_true",
                         help="关闭数据增强")
     parser.add_argument("--no_pretrain", action="store_true",
@@ -66,6 +68,7 @@ def main():
 
     backbone = cfg.get("model", {}).get("backbone", "resnet18")
     encoder_dim = cfg.get("model", {}).get("encoder_dim", 64)
+    base_filters = cfg.get("model", {}).get("resnet", {}).get("base_filters", 32)
 
     method = args.method
     print(f"\n{'#'*60}")
@@ -78,13 +81,24 @@ def main():
         encoder = create_encoder("cnn").to(device)
     elif method == "ProtoNet_CrossAttn":
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
-                                 use_se=True).to(device)
+                                 use_se=True,
+                                 base_filters=base_filters).to(device)
         cross_attn = CrossAttentionModule(d_model=encoder_dim).to(device)
         ca_params = sum(p.numel() for p in cross_attn.parameters())
-        print(f"🆕 跨注意力模块 (参数: {ca_params/1e3:.1f}K)")
+        print(f"[NEW] 跨注意力 V1 (参数: {ca_params/1e3:.1f}K)")
+    elif method == "ProtoNet_CrossAttnV2":
+        encoder = create_encoder(backbone, encoder_dim=encoder_dim,
+                                 use_se=True,
+                                 base_filters=base_filters).to(device)
+        cross_attn = CrossAttentionModuleV2(
+            d_model=encoder_dim, nhead=4, dropout=0.3,
+            use_self_attn=True).to(device)
+        ca_params = sum(p.numel() for p in cross_attn.parameters())
+        print(f"[NEW] 跨注意力 V2 多头+自注意力 (参数: {ca_params/1e3:.1f}K)")
     else:
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
-                                 use_se=True).to(device)
+                                 use_se=True,
+                                 base_filters=base_filters).to(device)
 
     # 加载 SimCLR 预训练权重
     if not args.no_pretrain and method != "ProtoNet_CNN":
@@ -106,18 +120,18 @@ def main():
             # 检查 fc 层维度是否匹配（处理 encoder_dim 变化）
             fc_key = 'fc.weight'
             if fc_key in sd and sd[fc_key].shape != encoder.fc.weight.shape:
-                print(f"   ⚠️ fc 维度不匹配: 预训练 {sd[fc_key].shape} → 模型 {encoder.fc.weight.shape}，跳过 fc")
+                print(f"   [WARN] fc 维度不匹配: 预训练 {sd[fc_key].shape} → 模型 {encoder.fc.weight.shape}，跳过 fc")
                 del sd[fc_key]
                 if 'fc.bias' in sd:
                     del sd['fc.bias']
             miss, unexp = encoder.load_state_dict(sd, strict=False)
-            print(f"✅ 加载 SimCLR 预训练权重: {pretrain_path}")
+            print(f"[OK] 加载 SimCLR 预训练权重: {pretrain_path}")
             if miss:
                 print(f"   缺失键: {len(miss)} (fc 层随机初始化)")
             if unexp:
                 print(f"   意外键: {len(unexp)}")
         else:
-            print(f"ℹ️  未找到 SimCLR 预训练权重，从头训练")
+            print(f"[INFO]  未找到 SimCLR 预训练权重，从头训练")
 
     sep_weight = args.sep if args.sep is not None else \
         cfg.get("training", {}).get("sep_weight", 0.05)
@@ -141,6 +155,7 @@ def main():
         'ProtoNet_CosineT': 'cosine',
         'ProtoNet_Transductive': 'transductive',
         'ProtoNet_CrossAttn': 'crossattn',
+        'ProtoNet_CrossAttnV2': 'crossattn',
     }
     proto_method = method_map.get(method, 'cosine')
 

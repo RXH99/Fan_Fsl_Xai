@@ -83,7 +83,7 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
     print(f"{'='*60}")
     print(f"配置: {ways}-way {shot}-shot, {episodes} episodes, lr={lr}")
     if use_augmentation:
-        print(f"✅ 数据增强已启用")
+        print(f"[OK] 数据增强已启用")
     if sep_weight > 0:
         print(f"类间分离权重: {sep_weight}")
     if proto_method == 'transductive':
@@ -195,7 +195,7 @@ def train_fewshot(encoder, train_dataset, val_dataset, config, device,
     model_path = os.path.join(
         output_dir, f"fewshot_encoder_{method.replace('/', '_')}.pth")
     torch.save(encoder.state_dict(), model_path)
-    print(f"\n✅ {method} 训练完成！最佳验证准确率: {best_val_acc:.1f}%")
+    print(f"\n[OK] {method} 训练完成！最佳验证准确率: {best_val_acc:.1f}%")
     print(f"   最佳 epoch: {best_epoch}, 模型保存: {model_path}")
 
     if cross_attn is not None:
