@@ -1,0 +1,36 @@
+experiment_name: Fan_Fsl_Xai_Clean
+
+data:
+  raw_dir: "data"
+  processed_dir: "data/processed"
+  window_size: 1024
+  window_step: 1024
+
+training:
+  cnn:
+    batch_size: 64
+    epochs: 50
+    lr: 0.001
+
+  fewshot:
+    episodes: 3000
+    val_episodes: 200
+    ways: 10
+    shot: 5
+    query: 5
+    lr: 0.0001
+
+  sep_weight: 0.15
+
+model:
+  backbone: "resnet18"
+  encoder_dim: 128
+  resnet:
+    in_channels: 1
+    base_filters: 64
+    use_se: true
+    use_multiscale: false
+
+paths:
+  output_dir: "outputs/clean"
+  data_info: "data/dataset_info.json"
