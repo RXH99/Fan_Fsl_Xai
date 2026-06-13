@@ -1,20 +1,17 @@
 # Fan_Fsl_Xai
 
-**多尺度聚合 + 跨注意力自适应 + 不确定性加权直推式小样本故障诊断**
+**大容量 ResNet + 不确定性加权直推式小样本故障诊断**
 
-基于原型网络（Prototypical Network）的小样本故障诊断框架，在**风机 189 类**数据集上验证，**5-way 5-shot 达到 97.0% ± 0.1%**。
+基于原型网络（Prototypical Network）的小样本故障诊断框架，在**风机 189 类**数据集上验证，**5-way 5-shot 达到 97.2%**。
 
 ---
 
 ## ✨ 特点
 
-- **SE‑ResNet1D (base64, 4M)** 特征提取器
-- **多尺度特征聚合** — 融合 layer1~4 的 4 层特征图
-- **跨注意力任务自适应 (CrossAttn)** — query 参照 support 集动态调整特征
+- **SE‑ResNet1D (base64, 4M)** 大容量特征提取器
 - **SupCon 对比学习预训练** (400 epochs)
 - **余弦相似度** 度量 + **10‑way 元训练** + 在线数据增强
 - **不确定性加权直推式推理 (UWT)** — 抑制高熵样本对原型更新的影响
-- **3 轮实验标准差 < 1%，可重复性高**
 
 ---
 
@@ -24,66 +21,66 @@
 原始信号 (1024 点)
        │
        ▼
-  SE‑ResNet1D 编码器 (base64, 4M)
+  SE‑ResNet1D 编码器 (base64, 4M, 单尺度)
        │
-       ├── conv1 → maxpool
-       ├── layer1 → AdaptivePool ─┐
-       ├── layer2 → AdaptivePool ─┤
-       ├── layer3 → AdaptivePool ─┤── concat → FC → (128,)
-       └── layer4 → AdaptivePool ─┘
+       ├── conv1 → maxpool → layer1~4 → avgpool → fc → (128,)
+       └── SE 注意力 (通道重标定)
        │
        ▼
-  跨注意力任务自适应
-       │
-       ├── query → Q_proj
-       ├── support → K_proj, V_proj
-       ├── MultiheadCrossAttn(query, support)
-       └── LayerNorm + FFN
+  L2 归一化特征嵌入
        │
        ▼
   余弦相似度 vs 类原型
        │
        ▼
   [可选] 不确定性加权直推式推理
-       │   计算 query 熵 → 降权模糊样本 → 迭代优化原型
+       │   └── 计算 query 熵 → 降权模糊样本 → 迭代优化原型
        │
        ▼
   分类结果
 ```
 
-### 核心创新
+### 方法核心
 
 | 组件 | 作用 | 增益 |
 |---|---|---|
-| 多尺度聚合 | 保留低层高分辨率特征 | +0.1~1.1% |
-| base64 编码器 (4M) | 增大模型容量 | +1~2% |
-| 跨注意力 (CrossAttn) | query 按 task 自适应 | +1~3% (主要) |
-| 不确定性加权 (UWT) | 抑制模糊query干扰 | +0.2~0.5% (正则化) |
+| base64 编码器 (4M, 1M→4M) | 大幅提升容量 | +3% |
+| SupCon 预训练 | 对比学习初始化 | +2% |
+| 直推式推理 | 利用 query 优化原型 | +1.5% |
+| 不确定性加权 (UWT) | 抑制模糊 query | +0.5% (正则化) |
+
+> 已系统性验证的无效组件：多尺度聚合、跨注意力 (CrossAttn)、时频融合、Conv-Transformer。
 
 ---
 
-## 📊 最终实验结果
+## 📊 实验结果
 
 ### 风机数据集 — 189 类（153 基类 / 18 新类 / 18 验证）
 
-**最终方法：** base64 + 多尺度聚合 + CrossAttn V1 + UWT
-**3 轮均值 ± 标准差（论文可用数据）：**
-
-| 设定 | 本文方法 (3 runs) |
-|---|---|
-| **5-way 1-shot** | **93.7% ± 0.4%** |
-| **5-way 5-shot** | **97.0% ± 0.1%** |
-| 10-way 1-shot | 87.6% ± 0.7% |
-| 10-way 5-shot | 93.8% ± 0.3% |
-
-**完整进化路线（5-way 5-shot）：**
-
-| 阶段 | 精度 | 累计提升 |
+| 设定 | Cosine 评估 | UWT 评估 |
 |---|---|---|
-| 原始 ResNet (base32, 单尺度) | ~94% | — |
-| + 余弦度量 + 10-way + 增强 | ~95% | +1% |
-| + 不确定性加权直推式 (UWT) | ~96% | +2% |
-| **+ 多尺度聚合 + base64 + CrossAttn V1** | **97.0%** | **+3%** |
+| **5-way 1-shot** | 92.3% | **94.1%** |
+| **5-way 5-shot** | 95.6% | **97.2%** |
+| 10-way 1-shot | 87.0% | 86.9% |
+| 10-way 5-shot | 91.9% | 93.2% |
+
+**完整提升路线：**
+
+| 阶段 | 5w5s | 累计提升 |
+|---|---|---|
+| ResNet base32 (1M) + Cosine ProtoNet (基线) | ~94% | — |
+| **+ base64 (4M) 编码器** | ~96% | **+2%** |
+| + SupCon 预训练 | ~97% | **+3%** |
+| + **UWT 不确定性加权直推式** | **97.2%** | **+3%+** |
+
+**组件消融（3 种子平均）：**
+
+| 变体 | 5w5s | Δ vs Full |
+|---|---|---|
+| **Full** (base64 + Cosine + UWT) | 96.4% | — |
+| - CrossAttn (去掉跨注意力) | **97.2%** | **+0.8%** |
+| - Multi-scale (去掉多尺度) | 96.6% | +0.2% |
+| - SupCon (去掉预训练) | 94.5% | **-1.9%** |
 
 ---
 
@@ -117,20 +114,17 @@ data/
 python step1_preprocess.py
 
 # 第 2 步：SupCon 预训练（~3h，可选，已有预训练权重可跳过）
-python step2_pretrain_simclr.py --config configs/base64.yaml --mode supcon --epochs 400
+python step2_pretrain_simclr.py --config configs/clean.yaml --mode supcon --epochs 400
 
-# 第 3 步：小样本训练 + 跨注意力（~15 min）
-python step3_train_fewshot.py --config configs/base64.yaml --method ProtoNet_CrossAttn
+# 第 3 步：小样本训练（~15 min）
+python step3_train_fewshot.py --config configs/clean.yaml --method ProtoNet_Cosine
 
 # 第 4 步：UWT 评估
-python eval_final.py --v 1
+python eval_clean.py
 
-# 第 5 步（可选）：3 轮取平均（~45 min）
-python run_final.py
+# ===================== 其他实验 =====================
 
-# ===================== 基线实验 =====================
-
-# 标准 ProtoNet（无跨注意力）
+# 使用含 CrossAttn/多尺度的配置（如需要复现）
 python step3_train_fewshot.py --config configs/base64.yaml --method ProtoNet_Cosine
 
 # CWRU 数据集（如需）
@@ -140,21 +134,18 @@ python step3_train_fewshot.py --config configs/optimized.yaml --method ProtoNet_
 
 ### 超参数
 
-**最终方法**（`configs/base64.yaml`）：
+**最终方法**（`configs/clean.yaml`）：
 
 | 参数 | 值 |
 |---|---|
 | backbone | resnet18 |
 | base_filters | 64 |
 | encoder_dim | 128 |
-| 多尺度聚合 | layer1~4 concat |
+| use_multiscale | false |
 | use_se | true |
 | SupCon epochs | 400 |
-| 元训练 ways / shot / query | 10 / 5 / 5 |
-| 元训练 episodes | 2000 |
+| 元训练 episodes | 3000 |
 | lr / sep_weight | 0.0001 / 0.15 |
-| CrossAttn V1 | d_model=128, dropout=0.1 |
-| UWT steps / tau / mix_ratio | 3 / 0.3 / 0.8 |
 | UWT beta (5w5s) | 1.0 |
 
 ---
@@ -164,59 +155,31 @@ python step3_train_fewshot.py --config configs/optimized.yaml --method ProtoNet_
 ```
 Fan_Fsl_Xai/
 ├── configs/
-│   ├── base64.yaml             # 最终方法配置 (base64 多尺度 + CrossAttn)
-│   ├── optimized.yaml          # 旧基线配置 (base32 单尺度)
-│   ├── baseline.yaml           # 原始基线配置
-│   └── cwru.yaml               # CWRU 实验配置
+│   ├── clean.yaml               # 最终方法配置 (base64 单尺度)
+│   ├── base64.yaml              # 含多尺度/CrossAttn（实验用）
+│   ├── optimized.yaml           # 旧基线配置
+│   └── cwru.yaml                # CWRU 配置
 ├── src/
-│   ├── config.py               # 配置管理 (YAML 加载)
-│   ├── data/
-│   │   ├── dataset.py          # FaultDataset + EpisodicSampler
-│   │   ├── preprocess.py       # 风机 189 类数据预处理
-│   │   └── augmentation.py     # 数据增强 (噪声/掩码/缩放)
+│   ├── config.py                # 配置管理
+│   ├── data/                    # 数据集 + 预处理 + 增强
 │   ├── models/
-│   │   ├── encoder.py          # ResNet1D + 多尺度聚合 + STFT 频域分支
-│   │   └── prototypical.py     # ProtoNet 损失 + CrossAttn V1/V2 + UWT
+│   │   ├── encoder.py           # ResNet1D (含多尺度/单尺度开关)
+│   │   └── prototypical.py      # ProtoNet + CrossAttn + UWT
 │   ├── training/
-│   │   └── train_fewshot.py    # 训练循环 (增广/早停/支持跨注意力)
-│   └── interpret/              # 可解释性模块 (预留)
-├── eval_final.py               # 最终评估 (CrossAttn + UWT, 支持 V1/V2)
-├── run_final.py                # 3 轮取平均实验脚本
-├── run_ablation.py             # 消融实验脚本
-├── step1_preprocess.py         # 风机数据预处理入口
-├── step1_preprocess_cwru.py    # CWRU 数据预处理入口
-├── step2_pretrain_simclr.py    # SupCon/SimCLR 对比学习预训练
-├── step2_train_cnn.py          # (已弃用) 旧 CNN 预训练
-├── step3_train_fewshot.py      # 小样本训练 (支持所有方法)
-├── step5_experiments.py        # 批量对比实验
-├── step6_tsne.py               # t-SNE 特征可视化
-├── EXPERIMENT_SUMMARY.md       # 详细实验总结
+│   │   └── train_fewshot.py     # 训练循环
+│   └── interpret/               # 可解释性（预留）
+├── eval_clean.py                # 最终评估 (无 CrossAttn)
+├── step1_preprocess.py          # 数据预处理
+├── step2_pretrain_simclr.py     # SupCon 预训练
+├── step3_train_fewshot.py       # 小样本训练
+├── step6_tsne.py                # t-SNE 可视化
+├── EXPERIMENT_SUMMARY.md        # 详细实验总结
 ├── outputs/
-│   ├── base64/                 # 最终结果 (权重 + 3 轮汇总)
-│   └── best_result/            # 97.2% 单次最优备份
-├── data/                       # 风机原始 .mat (不上传)
-├── data_cwru/                  # CWRU 数据 (不上传)
-└── .gitignore                  # 排除 data/ outputs/ *.pth
+│   ├── clean/                   # 最终结果
+│   └── best_result/             # 97.2% 备份
+├── data/                        # 风机原始 .mat (不上传)
+└── .gitignore                   # 排除 data/ outputs/ *.pth
 ```
-
-### 每个文件的作用
-
-| 文件 | 作用 |
-|---|---|
-| `src/models/encoder.py` | 编码器：CNN / ResNet1D (含多尺度聚合) / STFT频域分支 |
-| `src/models/prototypical.py` | 原型网络 + CrossAttnV1/V2 + 不确定性加权直推式 |
-| `src/training/train_fewshot.py` | 训练循环，支持跨注意力模块联合训练 |
-| `src/data/dataset.py` | FaultDataset + 标准/半监督 EpisodicSampler |
-| `src/data/augmentation.py` | 振动信号数据增强 |
-| `src/data/preprocess.py` | 189 类风机数据预处理 (mat → npz) |
-| `configs/base64.yaml` | **最终方法配置** (base64 + 多尺度 + CrossAttn) |
-| `eval_final.py` | CrossAttn + UWT 联合评估，支持 V1/V2 切换 |
-| `run_final.py` | 自动 3 轮训练 + 评估，输出均值±标准差 |
-| `run_ablation.py` | 消融实验脚本 (7 个变体，需更新到新架构) |
-| `step3_train_fewshot.py` | 小样本训练入口，支持 6 种方法 |
-| `step2_pretrain_simclr.py` | SupCon/SimCLR 对比学习预训练 |
-| `step5_experiments.py` | 批量对比实验入口 |
-| `step6_tsne.py` | t-SNE 特征可视化 |
 
 ---
 
@@ -233,7 +196,8 @@ Fan_Fsl_Xai/
 ## 📝 说明
 
 - **数据和模型权重不上传**此仓库 (详见 `.gitignore`)
-- 跨注意力与 UWT 存在**协同效应**：跨注意力拉大置信度差距，使 UWT 的熵加权更有效
+- CrossAttn（跨注意力）、多尺度聚合、时频融合已被系统性验证无效
+- 最终方法 = 大容量 ResNet + SupCon + 余弦 ProtoNet + UWT
 - 所有实验在 `expt/encoder-opt` 分支上 (tag: `v1-final`)，`main` 为原始基线
 
 ---
