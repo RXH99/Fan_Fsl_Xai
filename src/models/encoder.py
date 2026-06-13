@@ -74,27 +74,27 @@ class ResNet1DEncoder(nn.Module):
     输入: (B, 1, 1024) → 输出: (B, encoder_dim)
     """
     def __init__(self, in_channels=1, base_filters=32, encoder_dim=64,
-                 use_se=True):
+                 use_se=True, use_multiscale=True):
         super().__init__()
         self.in_planes = base_filters
 
-        # 初始卷积
         self.conv1 = nn.Conv1d(in_channels, base_filters,
                                kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm1d(base_filters)
         self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
 
-        # ResNet 四层
         self.layer1 = self._make_layer(base_filters, 2, stride=1, use_se=use_se)
         self.layer2 = self._make_layer(base_filters * 2, 2, stride=2, use_se=use_se)
         self.layer3 = self._make_layer(base_filters * 4, 2, stride=2, use_se=use_se)
         self.layer4 = self._make_layer(base_filters * 8, 2, stride=2, use_se=use_se)
 
-        # 多尺度特征聚合：layer1~4 pool → concat → fc
-        ms_feat_dim = base_filters * 15  # (1+2+4+8) × base_filters
+        if use_multiscale:
+            feat_dim = base_filters * 15  # layer1~4: (1+2+4+8) * base_f
+        else:
+            feat_dim = base_filters * 8   # 仅 layer4
+        self.use_multiscale = use_multiscale
         self.ms_pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(ms_feat_dim, encoder_dim)
-
+        self.fc = nn.Linear(feat_dim, encoder_dim)
         self.output_dim = encoder_dim
 
     def _make_layer(self, planes, num_blocks, stride, use_se):
@@ -106,26 +106,25 @@ class ResNet1DEncoder(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x, return_features=False):
-        # 编码器前向，保留每层特征图
-        out = F.relu(self.bn1(self.conv1(x)))   # (B, base_f, 512)
-        out = self.maxpool(out)                  # (B, base_f, 256)
-        f1 = self.layer1(out)                     # (B, base_f*1, 256)
-        f2 = self.layer2(f1)                      # (B, base_f*2, 128)
-        f3 = self.layer3(f2)                      # (B, base_f*4, 64)
-        f4 = self.layer4(f3)                      # (B, base_f*8, 32)
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.maxpool(out)
+        f1 = self.layer1(out)
+        f2 = self.layer2(f1)
+        f3 = self.layer3(f2)
+        f4 = self.layer4(f3)
 
-        # 多尺度池化：每层做全局平均池化，保留不同感受野的信息
-        p1 = self.ms_pool(f1).squeeze(-1)          # (B, base_f*1)
-        p2 = self.ms_pool(f2).squeeze(-1)          # (B, base_f*2)
-        p3 = self.ms_pool(f3).squeeze(-1)          # (B, base_f*4)
-        p4 = self.ms_pool(f4).squeeze(-1)          # (B, base_f*8)
-
-        out = torch.cat([p1, p2, p3, p4], dim=1)   # (B, base_f*15)
+        if self.use_multiscale:
+            p1 = self.ms_pool(f1).squeeze(-1)
+            p2 = self.ms_pool(f2).squeeze(-1)
+            p3 = self.ms_pool(f3).squeeze(-1)
+            p4 = self.ms_pool(f4).squeeze(-1)
+            out = torch.cat([p1, p2, p3, p4], dim=1)
+        else:
+            out = self.ms_pool(f4).squeeze(-1)
 
         if return_features:
             return out
-
-        out = self.fc(out)                          # (B, encoder_dim)
+        out = self.fc(out)
         return out
 
 

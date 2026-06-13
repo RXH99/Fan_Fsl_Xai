@@ -106,8 +106,8 @@ def main():
         cand_paths = [
             os.path.join(cfg["paths"]["output_dir"],
                          f"pretrained_{backbone}_encoder.pth"),
-            os.path.join("outputs",
-                         f"pretrained_{backbone}_encoder.pth"),
+            os.path.join("outputs", f"pretrained_{backbone}_encoder.pth"),
+            os.path.join("outputs/base64", f"pretrained_{backbone}_encoder.pth"),
         ]
         pretrain_path = None
         for p in cand_paths:

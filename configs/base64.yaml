@@ -13,7 +13,7 @@ training:
     lr: 0.001
 
   fewshot:
-    episodes: 2000
+    episodes: 3000
     val_episodes: 200
     ways: 10
     shot: 5
