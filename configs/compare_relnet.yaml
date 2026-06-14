@@ -1,0 +1,41 @@
+# RelationNet 对比实验配置
+# 继承 clean.yaml 的编码器结构，增加 RelationNet 特有参数
+
+experiment_name: Fan_Fsl_Xai_Compare_RelNet
+
+data:
+  raw_dir: "data"
+  processed_dir: "data/processed"
+  window_size: 1024
+  window_step: 1024
+
+training:
+  cnn:
+    batch_size: 64
+    epochs: 50
+    lr: 0.001
+
+  fewshot:
+    episodes: 3000
+    val_episodes: 200
+    ways: 10
+    shot: 5
+    query: 5
+    lr: 0.0001
+    lr_relnet: 0.001         # Relation Module 学习率
+
+  sep_weight: 0.15
+
+model:
+  backbone: "resnet18"
+  encoder_dim: 128
+  resnet:
+    in_channels: 1
+    base_filters: 64
+    use_se: true
+    use_multiscale: false
+
+paths:
+  output_dir: "outputs/clean"            # 复用 clean 模型的编码器
+  relnet_output: "outputs/relationnet"   # RelationNet 输出目录
+  data_info: "data/dataset_info.json"

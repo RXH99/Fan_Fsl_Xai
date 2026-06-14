@@ -198,10 +198,12 @@ def main():
     backbone = cfg.get("model", {}).get("backbone", "resnet18")
     encoder_dim = cfg.get("model", {}).get("encoder_dim", 64)
     base_filters = cfg.get("model", {}).get("resnet", {}).get("base_filters", 32)
+    use_multiscale = cfg.get("model", {}).get("resnet", {}).get("use_multiscale", True)
 
     encoder = create_encoder(backbone, encoder_dim=encoder_dim,
                              use_se=True, in_channels=1,
-                             base_filters=base_filters).to(device)
+                             base_filters=base_filters,
+                             use_multiscale=use_multiscale).to(device)
     model = ContrastiveModel(encoder, projection_dim=128).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

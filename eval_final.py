@@ -77,11 +77,14 @@ args = parser.parse_args()
 v_suffix = f"V{args.v}"
 suffix = "V2" if args.v == 2 else ""
 
+sd = torch.load(f"outputs/base64/fewshot_encoder_ProtoNet_CrossAttn{suffix}.pth",
+               map_location=device)
+fc_shape = sd.get('fc.weight', torch.zeros(0)).shape
+use_ms = len(fc_shape) == 2 and fc_shape[1] == 960
+
 encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
-                         base_filters=64).to(device)
-encoder.load_state_dict(
-    torch.load(f"outputs/base64/fewshot_encoder_ProtoNet_CrossAttn{suffix}.pth",
-               map_location=device))
+                         base_filters=64, use_multiscale=use_ms).to(device)
+encoder.load_state_dict(sd)
 encoder.eval()
 
 ca_cls = CrossAttentionModuleV2 if args.v == 2 else CrossAttentionModule

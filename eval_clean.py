@@ -10,12 +10,15 @@ from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
 
 device = torch.device("cuda")
-encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
-                         base_filters=64, use_multiscale=False).to(device)
+
+# 从权重自动推断 use_multiscale
 sd = torch.load("outputs/clean/fewshot_encoder_ProtoNet_Cosine.pth", map_location=device)
-if 'fc.weight' in sd and sd['fc.weight'].shape != encoder.fc.weight.shape:
-    del sd['fc.weight'], sd['fc.bias']
-encoder.load_state_dict(sd, strict=False)
+fc_shape = sd.get('fc.weight', torch.zeros(0)).shape
+use_ms = len(fc_shape) == 2 and fc_shape[1] == 960  # 960→多尺度, 512→单尺度
+
+encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
+                         base_filters=64, use_multiscale=use_ms).to(device)
+miss, unexp = encoder.load_state_dict(sd, strict=False)
 encoder.eval()
 
 test = FaultDataset("data/processed/preprocessed.npz", split="test")

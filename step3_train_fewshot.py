@@ -69,6 +69,7 @@ def main():
     backbone = cfg.get("model", {}).get("backbone", "resnet18")
     encoder_dim = cfg.get("model", {}).get("encoder_dim", 64)
     base_filters = cfg.get("model", {}).get("resnet", {}).get("base_filters", 32)
+    use_multiscale = cfg.get("model", {}).get("resnet", {}).get("use_multiscale", True)
 
     method = args.method
     print(f"\n{'#'*60}")
@@ -82,14 +83,16 @@ def main():
     elif method == "ProtoNet_CrossAttn":
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
                                  use_se=True,
-                                 base_filters=base_filters).to(device)
+                                 base_filters=base_filters,
+                                 use_multiscale=use_multiscale).to(device)
         cross_attn = CrossAttentionModule(d_model=encoder_dim).to(device)
         ca_params = sum(p.numel() for p in cross_attn.parameters())
         print(f"[NEW] 跨注意力 V1 (参数: {ca_params/1e3:.1f}K)")
     elif method == "ProtoNet_CrossAttnV2":
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
                                  use_se=True,
-                                 base_filters=base_filters).to(device)
+                                 base_filters=base_filters,
+                                 use_multiscale=use_multiscale).to(device)
         cross_attn = CrossAttentionModuleV2(
             d_model=encoder_dim, nhead=4, dropout=0.3,
             use_self_attn=True).to(device)
@@ -98,7 +101,8 @@ def main():
     else:
         encoder = create_encoder(backbone, encoder_dim=encoder_dim,
                                  use_se=True,
-                                 base_filters=base_filters).to(device)
+                                 base_filters=base_filters,
+                                 use_multiscale=use_multiscale).to(device)
 
     # 加载 SimCLR 预训练权重
     if not args.no_pretrain and method != "ProtoNet_CNN":

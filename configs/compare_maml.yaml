@@ -1,0 +1,39 @@
+# MAML 对比实验配置
+# ⚠️ MAML 从零训练，10-way 对 189 类难度过高，改用 5-way
+
+experiment_name: Fan_Fsl_Xai_Compare_MAML
+
+data:
+  raw_dir: "data"
+  processed_dir: "data/processed"
+  window_size: 1024
+  window_step: 1024
+
+training:
+  cnn:
+    batch_size: 64
+    epochs: 50
+    lr: 0.001
+
+  fewshot:
+    episodes: 3000
+    val_episodes: 200
+    ways: 5                # MAML 用 5-way（10-way 从零学太难）
+    shot: 5
+    query: 5
+    lr: 0.001
+
+  sep_weight: 0.0          # MAML 不用类间分离损失
+
+model:
+  backbone: "resnet18"
+  encoder_dim: 128
+  resnet:
+    in_channels: 1
+    base_filters: 64
+    use_se: true
+    use_multiscale: false
+
+paths:
+  output_dir: "outputs/maml"
+  data_info: "data/dataset_info.json"
