@@ -256,7 +256,7 @@ def main():
     print("📋 与 ProtoNet (Cosine) 对比 (引用 eval_clean 结果)")
     print("=" * 50)
     print(f"  {'Method':<30} {'5w1s':>8} {'5w5s':>8} {'10w1s':>8} {'10w5s':>8}")
-    print(f"  {'ProtoNet + UWT (参考)':<30} {'84.0':>8} {'97.2':>8} {'74.0':>8} {'89.0':>8}")
+    print(f"  {'ProtoNet + UWT (参考)':<30} {'93.3':>8} {'97.1':>8} {'87.3':>8} {'94.2':>8}")
     print(f"  {'RelationNet (当前)':<30} {'TBD':>8} {'TBD':>8} {'TBD':>8} {'TBD':>8}")
     print(f"  {'RelationNet + UWT (当前)':<30} {'TBD':>8} {'TBD':>8} {'TBD':>8} {'TBD':>8}")
     print("=" * 50)

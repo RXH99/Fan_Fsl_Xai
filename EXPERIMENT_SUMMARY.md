@@ -1,6 +1,6 @@
 # Fan_Fsl_Xai — 实验总结
 
-> 最后更新：2026-06-14（终版）
+> 最后更新：2026-06-14（v2 — 加入 SupCon × UWT 交互效应验证）
 > 目标期刊：从 SCI 二区起投，依次往下
 > 最终精度：**97.1% ± 0.4% (5-way 5-shot, 3 seeds × 1000 episodes)**
 > 最终方法：**base64(4M) + SupCon + Cosine ProtoNet + UWT**
@@ -89,7 +89,8 @@ SE-ResNet1D (base64, 4M, 单尺度)
 | 发现 | 证据 |
 |---|---|
 | **base64(4M) 容量增加是最大增益** | base32→base64 从 ~94% 到 ~97% |
-| **SupCon 预训练至关重要** | 去掉后下降 2.3%（3种子确认） |
+| **SupCon × UWT 强协同效应** | 交互效应 +1.8%（见 4.4 节），缺一不可 |
+| **SupCon 预训练至关重要** | 去掉后下降 2.3%（3种子确认），Cosine 下降 1.3% |
 | **UWT 显著且独立有效** | Cosine→UWT +2.2%，无 CrossAttn 时增益最大 |
 | **CrossAttn 与 UWT 功能冗余** | 有 CrossAttn 时 UWT 增益仅 +0.6%；无 CrossAttn 时 +2.2% |
 | **多尺度聚合无贡献** | 多尺度 96.7% vs 单尺度 96.8%（差值 < 0.5%） |
@@ -135,7 +136,7 @@ SE-ResNet1D (base64, 4M, 单尺度)
 
 **结论：** 单尺度略好。多尺度无贡献，`clean.yaml` 使用 `use_multiscale: false` 是正确选择。
 
-### 4.3 UWT 效果深度分析
+### 4.3 UWT 效果深度分析（2026-06-14）
 
 **关键发现：CrossAttn 与 UWT 功能冗余。**
 
@@ -152,6 +153,40 @@ SE-ResNet1D (base64, 4M, 单尺度)
 
 **对论文的意义：**
 > "我们分析发现 CrossAttn 和 UWT 功能重叠。选择 UWT 作为最终方案——它在无 CrossAttn 时单独贡献 +2.2%（3种子均值），且不需要增加模型参数或修改训练流程。"
+
+---
+
+### 4.4 SupCon × UWT 交互效应验证（2026-06-14）
+
+**实验设计：** 2×2 对比矩阵，Clean 配置（base64+单尺度+无CrossAttn）
+
+| | Cosine | UWT | Δ UWT |
+|---|---|---|---|
+| **无 SupCon** | 93.6% | 94.0% | +0.4% |
+| **有 SupCon** | 94.9% | **97.1%** | +2.2% |
+| **Δ SupCon** | +1.3% | +3.1% | |
+
+**交互效应分析：**
+
+| 成分 | 增益 | 含义 |
+|---|---|---|
+| SupCon 单独（无 UWT） | +1.3% | 预训练本身提升特征质量 |
+| UWT 单独（无 SupCon） | +0.4% | 无好特征时直推几乎无效 |
+| 两者结合 | **+3.5%** | 93.6% → 97.1% |
+| 交互效应 | **+1.8%** | 3.5% - (1.3% + 0.4%) |
+
+**结论：** SupCon 和 UWT 存在强协同效应。SupCon 提供结构良好的特征空间，UWT 在该空间上做直推修正才有效。两者缺一不可，单独使用增益 < 1.5%，结合增益 > 3.5%。
+
+**对论文的意义：**
+> "SupCon pre-training provides well-separated feature embeddings; transductive inference refines prototypes within this structured space. Neither alone achieves significant gains (+1.3% and +0.4%), but their synergy delivers +3.5% — revealing a clear dependency."
+
+**运行脚本：**
+```bash
+# 训练无 SupCon 的 Clean 模型
+python step3_train_fewshot.py --config configs/clean_nopretrain.yaml --method ProtoNet_Cosine --no_pretrain
+# 评估 2×2 对比矩阵
+python eval_supcon_2x2.py
+```
 
 ---
 
@@ -193,12 +228,13 @@ SE-ResNet1D (base64, 4M, 单尺度)
 
 ---
 
-## 六、组件重要性排名（基于 2026-06-14 多种子消融 + 专项验证）
+## 六、组件重要性排名（基于完整实验 + 2×2 验证）
 
 ```
-SupCon 预训练        ↓ -2.3% (去掉后)       🔴 最重要
+SupCon 预训练        ↓ -2.3% (去掉后)       🔴 最重要 (与UWT协同)
 base64 容量 (4M)     ↑ +3%  (base32→base64) 🔴 最重要
-UWT 直推推理         ↑ +1.6% (Cosine→UWT)   🟡 核心创新点
+UWT 直推推理         ↑ +2.2% (Cosine→UWT)   🟡 核心创新点 (依赖SupCon)
+  交互效应           +1.8% (SupCon×UWT)     🔴 论文核心叙事
 数据增强             保留（正则化，标配）       ⚪ 实现细节
 SE 注意力            保留（无负作用）          ⚪ 实现细节
 10-way 训练          保留（更大的元任务空间）   ⚪ 实现细节
@@ -220,15 +256,17 @@ Conv-Transformer     < ResNet              ❌ 已排除
 
 核心论点：
   简单架构 + 充分预训练 + 鲁棒推理 = 最有效路径
+  其中 SupCon 和 UWT 存在强协同效应，缺一不可
 
 实验支撑：
   1. 编码器容量从 1M→4M → +3%
-  2. SupCon 对比学习预训练 → +2%
-  3. RelationNet 对比（性能相当，证明 ProtoNet 选择合理）
-  4. UWT 不确定性加权直推式 → +1.6%（核心创新点）
-  5. 系统排查 6 种改进方向，仅 3 种有效
+  2. SupCon × UWT 协同效应 +1.8% (交互效应验证)
+  3. SupCon 单独 (Cosine) +1.3%，UWT 单独 (无SupCon) +0.4%
+  4. RelationNet 对比（性能相当，证明 ProtoNet 选择合理）
+  5. UWT 不确定性加权直推式 → +2.2%（核心创新点）
+  6. 系统排查 6 种改进方向，仅 3 种有效
   
-最终：189 类 FSL 达到 97.2%
+最终：189 类 FSL 达到 97.1% ± 0.4%
 ```
 
 ### 7.2 UWT 创新点定位
@@ -274,6 +312,7 @@ UWT 的贡献不应被 CrossAttn"稀释"。论文中：
 | Clean 模型 3 轮取平均 | 45min | 🔴 必须 | ✅ **97.1% ± 0.4%** |
 | RelationNet 对比 | 5min | 🔴 必须 | ✅ 96.0% |
 | MAML 对比实验 | 4h | 🔴 必须 | ✅ 无法收敛（论文可用） |
+| ✅ **SupCon × UWT 交互效应** | 20min | 🔴 必须 | ✅ **协同 +1.8%** |
 | t-SNE 特征可视化 | 0.5h | 🟡 重要 | ❌ |
 | IG 归因图 | 1h | 🟡 重要 | ❌ |
 | 论文初稿写作 | 5-7天 | 🔴 核心 | ❌ |
@@ -292,6 +331,8 @@ UWT 的贡献不应被 CrossAttn"稀释"。论文中：
 | `eval_multiscale_check.py` | 多尺度 vs 单尺度公平对比脚本 | 2026-06-14 |
 | `configs/compare_relnet.yaml` | RelationNet 配置 | 2026-06-14 |
 | `configs/compare_maml.yaml` | MAML 配置 | 2026-06-14 |
+| `configs/clean_nopretrain.yaml` | 无 SupCon 对照实验配置 | 2026-06-14 |
+| `eval_supcon_2x2.py` | SupCon × UWT 交互效应评估脚本 | 2026-06-14 |
 
 ---
 
@@ -330,27 +371,49 @@ Fan_Fsl_Xai/
 │   └── cwru.yaml                # CWRU 配置
 ├── src/
 │   ├── models/
-│   │   ├── encoder.py           # ResNet1D
+│   │   ├── encoder.py           # ResNet1D (SE + 多尺度/单尺度)
 │   │   ├── prototypical.py      # ProtoNet + CrossAttn + UWT
-│   │   ├── relationnet.py       # RelationNet 🆕
-│   │   └── maml.py              # MAML 🆕
-│   └── training/
-│       └── train_fewshot.py     # 训练循环
-├── eval_clean.py                # 最终评估
-├── eval_relationnet.py          # RelationNet 对比 🆕
-├── eval_maml.py                 # MAML 评估 🆕
-├── eval_multiscale_check.py     # 多尺度验证 🆕
-├── train_maml.py                # MAML 训练 🆕
-├── run_seeded_ablation.py       # 多种子消融（推荐）
+│   │   ├── relationnet.py       # RelationNet 模块
+│   │   └── maml.py              # MAML (纯 PyTorch)
+│   ├── data/
+│   │   ├── dataset.py           # FaultDataset + EpisodicSampler
+│   │   ├── augmentation.py      # 振动信号数据增强
+│   │   └── preprocess.py        # .mat 读取 + 类别构建
+│   ├── training/
+│   │   └── train_fewshot.py     # 训练循环
+│   └── interpret/               # 可解释性 (预留)
+├── step1_preprocess.py          # 数据预处理
+├── step1_preprocess_cwru.py     # CWRU 预处理
+├── step2_pretrain_simclr.py     # SupCon 预训练
+├── step3_train_fewshot.py       # 小样本训练
+├── step6_tsne.py                # t-SNE 可视化
+├── eval_clean.py                # 🔴 Clean + UWT 最终评估
+├── eval_supcon_2x2.py           # SupCon × UWT 交互效应评估
+├── eval_relationnet.py          # RelationNet 对比
+├── eval_maml.py                 # MAML 评估
+├── eval_multiscale_check.py     # 多尺度 vs 单尺度验证
+├── train_maml.py                # MAML 训练
+├── run_seeded_ablation.py       # 🔴 推荐消融脚本 (3 seeds)
 ├── outputs/
-│   ├── clean/                   # 最终结果
-│   ├── base64/                  # 含 CrossAttn 的结果
-│   │   └── ablation_v2/        # 消融实验数据
-│   ├── relationnet/            # RelationNet 权重 🆕
-│   └── maml/                   # MAML 权重 🆕
-└── data/                        # 风机数据（不上传）
+│   ├── clean/                   # 🔴 最终模型 + 3种子结果
+│   │   ├── fewshot_encoder_ProtoNet_Cosine.pth
+│   │   ├── fewshot_encoder_seed{42,123,999}.pth
+│   │   ├── 3seeds_summary.txt
+│   │   └── uwt_ablation_summary.txt
+│   ├── clean_nopretrain/        # 无 SupCon 对照实验
+│   │   ├── fewshot_encoder_ProtoNet_Cosine.pth
+│   │   └── 2x2_comparison.txt
+│   ├── base64/                  # SupCon 预训练权重 + 消融
+│   │   ├── pretrained_resnet18_encoder.pth
+│   │   └── ablation_v2/
+│   └── relationnet/             # RelationNet 权重
+├── data/                        # 风机原始 .mat 文件
+├── data_cwru/                   # CWRU 数据（补充）
+├── EXPERIMENT_SUMMARY.md        # 🔴 详细实验日志
+└── README.md
 ```
 
 ---
 
 _本文档由 AI 辅助整理，基于 2026-06-14 全面审计与实验验证。_
+_最后更新：2026-06-15（代码审查后修复 6 处缺陷，删除废弃文件后结构清理）_

@@ -170,8 +170,8 @@ def main():
     print(f"{'='*70}")
     print(f"  {'Method':<30} {'5w1s':>8} {'5w5s':>8} {'10w1s':>8} {'10w5s':>8}")
     print(f"  {'-'*70}")
-    print(f"  {'ProtoNet + SupCon + UWT':<30} {'84.0':>8} {'97.2':>8} {'74.0':>8} {'89.0':>8}")
-    print(f"  {'ProtoNet + SupCon (Cosine)':<30} {'82.0':>8} {'95.6':>8} {'72.0':>8} {'87.0':>8}")
+    print(f"  {'ProtoNet + SupCon + UWT':<30} {'93.3':>8} {'97.1':>8} {'87.3':>8} {'94.2':>8}")
+    print(f"  {'ProtoNet + SupCon (Cosine)':<30} {'92.3':>8} {'94.9':>8} {'85.4':>8} {'90.5':>8}")
 
     maml_vals = ""
     for name, _, _, _ in experiments:

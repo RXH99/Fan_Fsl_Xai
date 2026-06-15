@@ -22,7 +22,6 @@ plt.rcParams["font.family"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"] # 兼
 plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 # ---------------------------------------------------------------------------
 
-from src.config import Config
 from src.data.dataset import FaultDataset
 from src.models.encoder import create_encoder
 
@@ -103,24 +102,29 @@ def plot_tsne(emb, labels, title, save_path, max_points=1000):
 
 
 def run():
-    config_path = "configs/baseline.yaml"
-    cfg = Config(config_path)
-    device = cfg.device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    npz_path = os.path.join(cfg.cfg["data"]["processed_dir"], "preprocessed.npz")
-    encoder_path = os.path.join(cfg.cfg["paths"]["output_dir"], "fewshot_encoder.pth")
+    npz_path = "data/processed/preprocessed.npz"
+    encoder_path = "outputs/clean/fewshot_encoder_ProtoNet_Cosine.pth"
 
     if not os.path.exists(encoder_path):
-        print(f"❌ 找不到 {encoder_path}，请先运行 step3_train_fewshot.py")
+        print(f"❌ 找不到 {encoder_path}，请先运行 step3_train_fewshot.py --config configs/clean.yaml --method ProtoNet_Cosine")
         sys.exit(1)
 
     print(f"设备: {device}")
 
-    encoder = create_encoder("cnn").to(device)
-    encoder.load_state_dict(torch.load(encoder_path, map_location=device))
-    print(f"✅ 加载编码器")
+    # 从权重推断 use_multiscale
+    sd = torch.load(encoder_path, map_location=device)
+    fc_shape = sd.get('fc.weight', torch.zeros(0)).shape
+    use_ms = len(fc_shape) == 2 and fc_shape[1] == 960
 
-    output_dir = os.path.join(cfg.cfg["paths"]["output_dir"], "tsne")
+    encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
+                             base_filters=64, use_multiscale=use_ms).to(device)
+    encoder.load_state_dict(sd)
+    encoder.eval()
+    print(f"✅ 加载编码器 (use_multiscale={'是' if use_ms else '否'})")
+
+    output_dir = "outputs/clean/tsne"
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. 训练集特征（153 类）

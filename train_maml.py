@@ -29,13 +29,7 @@ from datetime import datetime
 
 from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
-from src.models.maml import (
-    MAMLModel,
-    maml_forward,
-    maml_evaluate,
-    _get_params_dict,
-    _get_buffers_dict,
-)
+from src.models.maml import MAMLModel, maml_forward, maml_evaluate
 from src.data.augmentation import augment_vibration_batch
 
 
@@ -64,7 +58,7 @@ def parse_args():
     parser.add_argument("--no_aug", action="store_true",
                         help="关闭数据增强")
     parser.add_argument("--no_pretrain", action="store_true",
-                        help="MAML 默认无预训练，此选项无效（为接口统一保留）")
+                        help="不使用 SupCon 预训练权重（从零开始）")
     return parser.parse_args()
 
 
