@@ -78,6 +78,14 @@ def evaluate(encoder, cross_attn, test_dataset, device, mode='uwt', beta=1.0, ep
                     pk = F.normalize(torch.stack([se[sy == c].mean(0) for c in range(ways_k)]), dim=1)
                     _, pd_ = torch.max(torch.mm(qe, pk.t()), 1)
                     accs.append((pd_ == qy).float().mean().item())
+                elif mode == 'cosine_only':
+                    # 不使用CrossAttn的纯Cosine baseline
+                    se = F.normalize(encoder(sx), dim=1)
+                    qe = F.normalize(encoder(qx), dim=1)
+                    ways_k = len(torch.unique(sy))
+                    pk = F.normalize(torch.stack([se[sy == c].mean(0) for c in range(ways_k)]), dim=1)
+                    _, pd_ = torch.max(torch.mm(qe, pk.t()), 1)
+                    accs.append((pd_ == qy).float().mean().item())
                 elif mode == 'transductive':
                     _, acc_ = prototypical_loss_crossattn(encoder, cross_attn, sx, sy, qx, qy, device, sep_weight=0) \
                         if cross_attn is not None else (None, None)
@@ -224,7 +232,8 @@ def main():
     if full_encoder is not None:
         for name, mode, beta, label in [
             ("- UWT (beta=0, 无加权)", "uwt", 0.0, ""),
-            ("- Transductive (余弦)", "cosine", 0.0, ""),
+            ("- Cosine (无UWT, 有CrossAttn)", "cosine", 0.0, "用于计算UWT增益"),
+            ("- Cosine Only (无UWT, 无CrossAttn)", "cosine_only", 0.0, "纯Cosine baseline"),
         ]:
             print(f"\n{'='*60}")
             print(f"📌 {name} (复用 Full 编码器)")
@@ -236,13 +245,45 @@ def main():
                     all_seed_results.setdefault(name, {}).setdefault(m, []).append(results[m][0])
                     print(f"    {m}: {results[m][0]:.1f}%")
 
+        # 计算 Full 模型下的 UWT 增益
+        if "Full (Our Method)" in all_seed_results and "- Cosine (无UWT, 有CrossAttn)" in all_seed_results:
+            print(f"\n{'='*60}")
+            print("📊 CrossAttn 模式下的 UWT 增益分析")
+            print(f"{'='*60}")
+            for m in metrics:
+                uwt_vals = all_seed_results["Full (Our Method)"].get(m, [])
+                cosine_vals = all_seed_results["- Cosine (无UWT, 有CrossAttn)"].get(m, [])
+                cosine_only_vals = all_seed_results.get("- Cosine Only (无UWT, 无CrossAttn)", {}).get(m, [])
+                
+                if uwt_vals and cosine_vals:
+                    uwt_mean = np.mean(uwt_vals)
+                    cosine_mean = np.mean(cosine_vals)
+                    gain_with_crossattn = uwt_mean - cosine_mean
+                    
+                    print(f"\n  {m}:")
+                    print(f"    Cosine (有CrossAttn): {cosine_mean:.1f}%")
+                    print(f"    UWT (有CrossAttn):    {uwt_mean:.1f}%")
+                    print(f"    → UWT 增益 (有CrossAttn): Δ={gain_with_crossattn:+.1f}%")
+                    
+                    if cosine_only_vals:
+                        cosine_only_mean = np.mean(cosine_only_vals)
+                        gain_without_crossattn = uwt_mean - cosine_only_mean
+                        print(f"    Cosine (无CrossAttn): {cosine_only_mean:.1f}%")
+                        print(f"    → UWT 增益 (无CrossAttn): Δ={gain_without_crossattn:+.1f}%")
+                        print(f"    → CrossAttn 贡献: {cosine_mean - cosine_only_mean:+.1f}%")
+
     # === 汇总表 ===
     print(f"\n\n{'='*70}")
     print("📊 多种子消融汇总")
     print(f"{'='*70}")
-    variants = [a[0] for a in ABLATIONS] + ["- UWT (beta=0, 无加权)", "- Transductive (余弦)"]
+    variants = [a[0] for a in ABLATIONS] + [
+        "- UWT (beta=0, 无加权)", 
+        "- Cosine (无UWT, 有CrossAttn)",
+        "- Cosine Only (无UWT, 无CrossAttn)",
+        "- Transductive (余弦)"
+    ]
 
-    header = f"{'Setting':<20}"
+    header = f"{'Setting':<28}"
     for v in variants:
         header += f" {v:>26}"
     print(header)

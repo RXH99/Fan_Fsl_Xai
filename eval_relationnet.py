@@ -9,7 +9,7 @@ RelationNet 对比实验
   3. 在各种 way/shot 配置下全面评估
 
 运行:
-  python eval_relationnet.py
+  python eval_relationnet.py --config configs/clean.yaml
 """
 
 import os, sys
@@ -25,6 +25,7 @@ import numpy as np
 from src.data.dataset import FaultDataset, EpisodicSampler
 from src.models.encoder import create_encoder
 from src.models.relationnet import RelationModule, predict
+from src.utils import load_yaml_config, load_model_weights, check_gpu_availability
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -213,8 +214,7 @@ def main():
     print(f"📄 编码器: {args.encoder_path}")
     print(f"📋 RelationNet episodes: {args.relnet_episodes}")
 
-    with open(args.config, "r") as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_yaml_config(args.config)
 
     # 1. 加载数据集
     npz_path = os.path.join(cfg["data"]["processed_dir"], "preprocessed.npz")
@@ -222,14 +222,25 @@ def main():
     test_dataset = FaultDataset(npz_path, split="test")
 
     # 2. 加载预训练编码器 — 从权重自动推断 use_multiscale
-    sd = torch.load(args.encoder_path, map_location=device)
+    try:
+        sd = torch.load(args.encoder_path, map_location=device, weights_only=True)
+    except FileNotFoundError:
+        print(f"❌ 编码器权重文件不存在: {args.encoder_path}")
+        sys.exit(1)
+    
     fc_shape = sd.get('fc.weight', torch.zeros(0)).shape
     # base_filters=64 时: 多尺度 → 960, 单尺度 → 512
     use_ms = len(fc_shape) == 2 and fc_shape[1] == 960
 
     encoder = create_encoder("resnet18", encoder_dim=128, use_se=True,
                              base_filters=64, use_multiscale=use_ms).to(device)
-    miss, unexp = encoder.load_state_dict(sd, strict=False)
+    
+    try:
+        miss, unexp = load_model_weights(encoder, args.encoder_path, device, strict=False)
+    except (FileNotFoundError, RuntimeError) as e:
+        print(str(e))
+        sys.exit(1)
+    
     encoder.eval()
     print(f"  ✅ 编码器加载完成 ({sum(p.numel() for p in encoder.parameters())/1e6:.2f}M)")
     print(f"     use_multiscale={'是' if use_ms else '否'} | fc.shape={tuple(fc_shape)}")

@@ -31,6 +31,21 @@ model:
     use_se: true
     use_multiscale: false
 
+# UWT (不确定性加权直推式推理) 参数
+inference:
+  uwt:
+    enabled: true           # 是否启用UWT
+    steps: 3                # 迭代步数
+    tau: 0.3                # 温度系数（softmax）
+    mix_ratio: 0.8          # 动量混合比例 (0.8 * old + 0.2 * new)
+    beta_default: 1.0       # 默认beta值（5w5s）
+    # Beta调优范围（可选）
+    beta_search:
+      5w1s: 3.0
+      5w5s: 1.0
+      10w1s: 2.0
+      10w5s: 1.0
+
 paths:
   output_dir: "outputs/clean"
   data_info: "data/dataset_info.json"

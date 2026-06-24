@@ -37,7 +37,8 @@ from src.models.prototypical import (
 
 def parse_args():
     parser = argparse.ArgumentParser(description="小样本训练")
-    parser.add_argument("--config", default="configs/optimized.yaml")
+    parser.add_argument("--config", default="configs/clean.yaml",
+                        help="配置文件路径（默认clean最终方法配置）")
     parser.add_argument("--method", default="ProtoNet_Cosine",
                         choices=["ProtoNet_CNN", "ProtoNet_ResNet",
                                  "ProtoNet_Cosine", "ProtoNet_CosineT",

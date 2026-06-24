@@ -164,7 +164,8 @@ def supcon_loss_batch(z, labels, temperature=0.1):
 # ============ 主函数 ============
 def parse_args():
     parser = argparse.ArgumentParser(description="对比学习预训练")
-    parser.add_argument("--config", default="configs/optimized.yaml")
+    parser.add_argument("--config", default="configs/base64.yaml",
+                        help="配置文件路径（默认base64用于SupCon预训练）")
     parser.add_argument("--mode", default="supcon",
                         choices=["simclr", "supcon"],
                         help="simclr=无监督, supcon=监督对比（推荐）")
