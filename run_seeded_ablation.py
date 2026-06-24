@@ -174,13 +174,20 @@ def main():
                           "outputs/base64/pretrained_resnet18_encoder.pth"]:
                     if os.path.exists(p):
                         sd = torch.load(p, map_location=device)
-                        if 'fc.weight' in sd and sd['fc.weight'].shape != encoder.fc.weight.shape:
-                            del sd['fc.weight']
-                            if 'fc.bias' in sd:
-                                del sd['fc.bias']
-                        encoder.load_state_dict(sd, strict=False)
-                        print(f"    [OK] 加载预训练")
-                        break
+                        # 检查 conv1 维度是否匹配（base32 vs base64 兼容）
+                        skip_all = False
+                        if 'conv1.weight' in sd:
+                            if sd['conv1.weight'].shape[0] != encoder.conv1.weight.shape[0]:
+                                print(f"    [WARN] conv1 维度不匹配: 预训练 {sd['conv1.weight'].shape} → 模型 {encoder.conv1.weight.shape}，跳过全部")
+                                skip_all = True
+                        if not skip_all:
+                            if 'fc.weight' in sd and sd['fc.weight'].shape != encoder.fc.weight.shape:
+                                del sd['fc.weight']
+                                if 'fc.bias' in sd:
+                                    del sd['fc.bias']
+                            encoder.load_state_dict(sd, strict=False)
+                            print(f"    [OK] 加载预训练")
+                            break
 
             # 训练
             ca_kw = {"cross_attn": cross_attn} if cross_attn is not None else {}
